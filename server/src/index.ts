@@ -1,30 +1,71 @@
-// src/index.js
-import express, { Express, Request, Response } from 'express';
-import { Server as SocketIoServer } from 'socket.io';
-import { createServer } from 'node:http';
-import router from './router';
-import dotenv from 'dotenv';
+import express from 'express';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
+import cors from 'cors';
+import { addUser, getUser, getUsersInRoom, removeUser } from './users';
 
-dotenv.config();
-
-const app: Express = express();
-app.use(router);
-const port = process.env.PORT || 3000;
+const app = express();
+app.use(cors());
 const server = createServer(app);
-const io = new SocketIoServer(server);
-
-app.get('/', (req: Request, res: Response) => {
-    res.send('<h1>hello!</h1>');
+const io = new Server(server, {
+    cors: {
+        origin: 'http://localhost:5173', // frontend URL
+        methods: ['GET', 'POST'],
+    },
 });
 
+app.get('/', (req, res) => {
+    res.send('<h1>Hello world</h1>');
+});
+io.listen(4000);
+
 io.on('connection', (socket) => {
-    console.log('a user connected');
+    console.log('a user connected', socket.id);
+
+    socket.on('join', ({ name, room }, callback) => {
+        console.log({ name, room });
+        const { error, user } = addUser({ id: socket.id, name, room });
+        if (error) return callback(error);
+        console.log(`joining: ${user}`);
+
+        if (user) {
+            socket.emit('message', {
+                user: 'admin',
+                text: `${user?.name} welcome to romm ${user?.room}`,
+            });
+
+            socket.broadcast.to(user?.room).emit('message', {
+                user: 'admin',
+                text: `${user.name} has joined`,
+            });
+
+            socket.join(user?.room as string);
+        }
+        console.log({ user });
+
+        // callback({ message: `you have joined` });
+        callback();
+    });
+
+    socket.on('sendMessage', (message, callback) => {
+        const user = getUser(socket.id);
+        console.log(`this user: ${user}`);
+        if (user) {
+            console.log(message);
+
+            io.to(user?.room).emit('message', {
+                user: user.name,
+                text: message,
+            });
+        }
+        callback();
+    });
 
     socket.on('disconnect', () => {
-        console.log('user left');
+        console.log('user disconnected');
     });
 });
 
-app.listen(port, () => {
-    console.log(`[server]: Server is running at http://localhost:${port}`);
+server.listen(3000, () => {
+    console.log('server running at http://localhost:3000');
 });
